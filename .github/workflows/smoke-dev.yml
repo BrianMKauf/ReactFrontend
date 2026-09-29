@@ -1,0 +1,48 @@
+name: Smoke dev
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for site and check page + API from this origin
+        env:
+          API_URL: ${{ vars.DEV_API_URL || 'https://springbootbackend-bk-dev.onrender.com' }}
+          WEB_URL: ${{ vars.DEV_WEB_URL || 'https://reactfrontend-bk-dev.onrender.com' }}
+        run: |
+          set -e
+          API_URL=${API_URL%/}
+          WEB_URL=${WEB_URL%/}
+
+          echo "Checking $WEB_URL"
+          ok=
+          for i in $(seq 1 18); do
+            code=$(curl -sS -o /tmp/page.html -w "%{http_code}" "$WEB_URL" || true)
+            if [ "$code" = "200" ]; then
+              ok=1
+              break
+            fi
+            echo "attempt $i: HTTP $code"
+            sleep 10
+          done
+          if [ -z "$ok" ]; then
+            echo "Frontend did not return 200"
+            exit 1
+          fi
+          grep -q "root" /tmp/page.html
+
+          echo "Checking API as if the browser sent Origin $WEB_URL"
+          code=$(curl -sS -o /tmp/health.json -w "%{http_code}" \
+            -H "Origin: $WEB_URL" \
+            "$API_URL/api/health" || true)
+          echo "HTTP $code"
+          cat /tmp/health.json || true
+          if [ "$code" != "200" ]; then
+            echo "Website would fail to load API data (HTTP $code)."
+            exit 1
+          fi
+          grep -q '"status":"ok"' /tmp/health.json
